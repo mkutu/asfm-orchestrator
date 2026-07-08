@@ -1,0 +1,22 @@
+[project]
+name = "autosfm-orchestrator"
+version = "0.1.0"
+description = "SUNNY-oriented AutoSfM orchestration: SQLite/manual-log planning, Globus staging, AutoSfM execution, and output promotion."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.scripts]
+autosfm-orchestrator = "autosfm_orchestrator.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,83 @@
+workspace:
+  root: /home/mkutuga/asfm-orchestrator
+  keep_successful_runs: true
+  keep_failed_runs: true
+  lock_timeout_hours: 48
+
+database:
+  write_run_status: false
+  path: /mnt/research-projects/s/screberg/longterm_images2/globus_index/globus_file_index.sqlite3
+
+  # Filters for selecting current developed JPGs from globus_file_index.
+  # Leave values blank to avoid filtering by that column.
+  inventory_filters:
+    data_state: semifield-developed-images
+    endpoint: f45a24f8-09ba-11ec-b342-1feaf93e3729
+    site: CERES
+    storage_domain: dash_agir
+    namespace: 90daydata
+    storage_root: /90daydata/dash_agir
+
+  # DB-backed GCP lookup. If no match is found, paths.ceres_reference_root is
+  # still used as a fallback: <root>/<season>/<STATE>.csv when season is known.
+  reference_filters:
+    enabled: false
+    marker_path_fragment: GroundControlPoints
+    season:
+
+manual_log:
+  path: ./manual_log.csv
+  required_columns:
+    - batch_id
+    - start_time
+    - end_time
+  optional_columns:
+    - sub_batch_id
+    - notes
+    - cam_angle
+    - z_axis
+    - season
+    - process
+
+globus:
+  enabled: false
+  dry_run: true
+  cli: globus
+  ceres_endpoint: f45a24f8-09ba-11ec-b342-1feaf93e3729
+  ncsu_endpoint: 2f7f6170-8d5c-11e9-8e6a-029d279f7e24
+  poll_seconds: 30
+  label_prefix: autosfm
+
+paths:
+  # CERES-side source and output roots as seen by Globus endpoint paths.
+  ceres_source_root: /90daydata/dash_agir/semifield-developed-images
+  ceres_reference_root: /90daydata/dash_agir/semifield-utils/autosfm/GroundControlPoints
+  ceres_output_root: /90daydata/dash_agir/autosfm_outputs
+
+  # SUNNY/NCSU-accessible staging root as seen locally on SUNNY.
+  sunny_staging_root: /mnt/research-projects/s/screberg/longterm_images2/autosfm_staging
+
+autosfm:
+  dry_run: true
+  metashape_key_path:
+  num_gpus: 1
+  use_masking: false
+  resize_photos: true
+  downscale_factor: 0.75
+
+  detect_markers: true
+  import_references: true
+  match: true
+  align: true
+  optimize_cameras: true
+
+  build_depth: true
+  build_dense: true
+  build_model: true
+  build_dem: true
+  build_ortho: true
+
+  export_fov: true
+  export_pixel_grid: true
+  export_report: true 
+  pixel_grid_step: 100
