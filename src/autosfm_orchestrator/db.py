@@ -102,9 +102,19 @@ class InventoryDb:
     def find_gcp_reference(self, batch_id: str, season: str | None = None) -> ReferenceRecord | None:
         """Find a likely GCP reference CSV from globus_file_index.
 
-        The old AutoSfM code selected the first CSV in
-        GroundControlPoints/<season>/ whose stem contained the state. This method
-        mirrors that logic when possible but keeps it DB-backed.
+        Multiple sites (NCSU, CERES, JUNO, ...) may each hold an indexed copy of
+        the same reference file. `reference_filters.site_preference` in config
+        controls which copy is preferred when more than one match is found, e.g.:
+
+            reference_filters:
+              site_preference:
+                - CERES
+                - NCSU
+                - JUNO
+
+        Sites not listed are ranked after all listed sites, in whatever order
+        SQLite returns them. If site_preference is empty/unset, ties are broken
+        arbitrarily (previous behavior) and a warning is logged when it happens.
         """
         filters = self._reference_filters()
         if not filters.get("enabled", True):
@@ -129,22 +139,52 @@ class InventoryDb:
             params["season_like"] = f"%/{season}/%"
         self._add_optional_scope_filters(clauses, params, filters)
 
+        site_preference: list[str] = filters.get("site_preference") or []
+        if site_preference:
+            when_clauses = []
+            for i, site in enumerate(site_preference):
+                param_name = f"site_pref_{i}"
+                when_clauses.append(f"WHEN site = :{param_name} THEN {i}")
+                params[param_name] = site
+            site_rank_sql = f"CASE {' '.join(when_clauses)} ELSE {len(site_preference)} END"
+        else:
+            site_rank_sql = "0"
+
         query = f"""
             SELECT file_id, endpoint, site, storage_root, rel_path, full_path, file_name
             FROM globus_file_index
             WHERE {' AND '.join(clauses)}
             ORDER BY
+                {site_rank_sql},
                 CASE WHEN file_name LIKE :state_prefix THEN 0 ELSE 1 END,
                 rel_path,
                 file_name
-            LIMIT 1
         """
         params["state_prefix"] = f"{state}%"
         with self.connect() as conn:
-            row = conn.execute(query, params).fetchone()
-        if row is None:
+            rows = conn.execute(query, params).fetchall()
+
+        if not rows:
             log.warning("No GCP reference CSV found in globus_file_index for %s season=%s", batch_id, season)
             return None
+
+        if len(rows) > 1:
+            sites_found = sorted({row["site"] for row in rows})
+            if not site_preference:
+                log.warning(
+                    "Multiple GCP reference candidates for %s season=%s across sites=%s "
+                    "and no reference_filters.site_preference configured; selection is "
+                    "arbitrary. Selected site=%s (%s)",
+                    batch_id, season, sites_found, rows[0]["site"], rows[0]["full_path"],
+                )
+            else:
+                log.info(
+                    "Multiple GCP reference candidates for %s season=%s across sites=%s; "
+                    "selected site=%s per site_preference (%s)",
+                    batch_id, season, sites_found, rows[0]["site"], rows[0]["full_path"],
+                )
+
+        row = rows[0]
         return ReferenceRecord(
             source_path=Path(row["full_path"]),
             filename=row["file_name"],
@@ -272,8 +312,7 @@ class InventoryDb:
         }
 
     def _reference_filters(self) -> dict:
-        base = self._inventory_filters().copy()
-        base.update(self.config.get("database", {}).get("reference_filters", {}))
+        base = self.config.get("database", {}).get("reference_filters", {}).copy()
         base.update(self.config.get("reference_filters", {}))
         return base
 

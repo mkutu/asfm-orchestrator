@@ -86,8 +86,9 @@ def execute_run(config: dict, run: AutoSfmRun) -> AutoSfmRun:
             _safe_upsert_run_status(db, run, "running")
             write_manifest(run, status="running")
 
-            input_plan = build_input_transfer_plan(config, run)
-            execute_transfer(config, input_plan)
+            input_plans = build_input_transfer_plan(config, run)
+            for plan in input_plans:
+                execute_transfer(config, plan)
 
             outputs = AutoSfmRunner(config).run(run)
             log.info("AutoSfM outputs: %s", asdict(outputs))

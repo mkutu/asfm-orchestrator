@@ -6,7 +6,7 @@ workspace:
 
 database:
   write_run_status: false
-  path: /mnt/research-projects/s/screberg/longterm_images2/globus_index/globus_file_index.sqlite3
+  path: /home/mkutuga/asfm-orchestrator/db/globus_file_index.sqlite3
 
   # Filters for selecting current developed JPGs from globus_file_index.
   # Leave values blank to avoid filtering by that column.
@@ -21,9 +21,13 @@ database:
   # DB-backed GCP lookup. If no match is found, paths.ceres_reference_root is
   # still used as a fallback: <root>/<season>/<STATE>.csv when season is known.
   reference_filters:
-    enabled: false
+    enabled: true
     marker_path_fragment: GroundControlPoints
-    season:
+    season: peanuts_2026
+    site_preference:
+      - NCSU
+      - CERES #90daydata
+      - JUNO
 
 manual_log:
   path: ./manual_log.csv
@@ -42,6 +46,9 @@ manual_log:
 globus:
   enabled: false
   dry_run: true
+  wait_for_completion: true
+  timeout_seconds:          # leave blank for no timeout
+  
   cli: globus
   ceres_endpoint: f45a24f8-09ba-11ec-b342-1feaf93e3729
   ncsu_endpoint: 2f7f6170-8d5c-11e9-8e6a-029d279f7e24
@@ -49,13 +56,13 @@ globus:
   label_prefix: autosfm
 
 paths:
+  sunny_staging_root: /mnt/research-projects/s/screberg/longterm_images2/autosfm_staging
+  sunny_staging_globus_root: /rsstu/users/s/screberg/longterm_images2/autosfm_staging 
+  
   # CERES-side source and output roots as seen by Globus endpoint paths.
   ceres_source_root: /90daydata/dash_agir/semifield-developed-images
   ceres_reference_root: /90daydata/dash_agir/semifield-utils/autosfm/GroundControlPoints
   ceres_output_root: /90daydata/dash_agir/autosfm_outputs
-
-  # SUNNY/NCSU-accessible staging root as seen locally on SUNNY.
-  sunny_staging_root: /mnt/research-projects/s/screberg/longterm_images2/autosfm_staging
 
 autosfm:
   dry_run: true

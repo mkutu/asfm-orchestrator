@@ -89,9 +89,15 @@ class TransferItem:
 @dataclass
 class TransferPlan:
     label: str
-    source_endpoint: str
-    destination_endpoint: str
+    source_endpoint: str | None
+    destination_endpoint: str | None
     items: list[TransferItem] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.source_endpoint is None:
+            raise ValueError("source_endpoint must not be None")
+        if self.destination_endpoint is None:
+            raise ValueError("destination_endpoint must not be None")
 
 
 @dataclass
