@@ -56,13 +56,13 @@ globus:
   label_prefix: autosfm
 
 paths:
-  sunny_staging_root: /mnt/research-projects/s/screberg/longterm_images2/autosfm_staging
-  sunny_staging_globus_root: /rsstu/users/s/screberg/longterm_images2/autosfm_staging 
+  sunny_staging_root: /mnt/research-projects/s/screberg/longterm_images2/semifield-asfm/staging
+  sunny_staging_globus_root: /rsstu/users/s/screberg/longterm_images2/semifield-asfm/staging
   
   # CERES-side source and output roots as seen by Globus endpoint paths.
   ceres_source_root: /90daydata/dash_agir/semifield-developed-images
   ceres_reference_root: /90daydata/dash_agir/semifield-utils/autosfm/GroundControlPoints
-  ceres_output_root: /90daydata/dash_agir/autosfm_outputs
+  ceres_output_root: /90daydata/dash_agir/semifield-asfm
 
 autosfm:
   dry_run: true
