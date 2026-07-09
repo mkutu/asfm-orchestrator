@@ -45,6 +45,7 @@ class InventoryDb:
         a filename-derived epoch in `fname_ts_epoch`.
         """
         start_epoch, end_epoch = time_window_to_epoch(batch_id, start_time, end_time)
+        print(f"Searching for images in batch {batch_id} between {start_time} and {end_time} (epoch {start_epoch}-{end_epoch})")
         filters = self._inventory_filters()
         data_state = filters.get("data_state", "semifield-developed-images")
 

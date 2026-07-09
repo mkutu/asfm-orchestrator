@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
+import shutil
+from dataclasses import replace
 from pathlib import Path
 
 from autosfm_orchestrator.models import AutoSfmRun, ImageRecord, ManualLogEntry, ReferenceRecord, RunPaths
 from autosfm_orchestrator.utils import sanitize_for_path
+
+log = logging.getLogger(__name__)
 
 
 def make_run_id(entry: ManualLogEntry) -> str:
@@ -95,3 +100,76 @@ def create_workspace(paths: RunPaths) -> None:
         paths.outputs_dir,
     ]:
         path.mkdir(parents=True, exist_ok=True)
+
+
+# ----------------------------------------------------------------------
+# Local-scratch execution paths
+#
+# SUNNY is a single shared node with no scheduler and no job isolation
+# beyond what we build ourselves. /mnt/... paths (sunny_staging_root, used
+# by make_run_paths above) are NFS-mounted CERES/NCSU research storage.
+# /home/mkutuga is local disk on SUNNY, not NFS. Metashape's heavy I/O
+# (the .psx project, depth maps, dense cloud, resized photos) should run
+# against local disk, not NFS — NFS is slow for this and Metashape's
+# project locking is unreliable over it.
+# ----------------------------------------------------------------------
+
+
+def make_execution_paths(config: dict, run: AutoSfmRun) -> RunPaths:
+    """RunPaths for Metashape execution.
+
+    images_dir and reference_dir stay pointed at the NFS-staged sources —
+    full-resolution images are never copied to local disk in full; they're
+    read once (by resize_photo_directory) and only the downscaled copies
+    land locally. reference_dir is a single small CSV, cheap enough to read
+    directly off NFS too.
+
+    autosfm_dir / project_dir / refs_dir / pixel_grid_dir are redirected to
+    local scratch (config["paths"]["local_scratch_root"]), since that's
+    where Metashape does its heavy I/O: the .psx project file, depth maps,
+    dense cloud, and the resized photos themselves.
+
+    Everything else (run_root, lock_path, manifest_path, inputs_dir,
+    logs_dir, outputs_dir) stays on NFS unchanged — those are workflow-level
+    / final-output concerns (locking, the manifest, promoted outputs), not
+    Metashape compute scratch.
+    """
+    scratch_root = Path(config["paths"]["local_scratch_root"]).expanduser()
+    local_run_root = scratch_root / run.batch_id / run.sub_batch_id
+    local_autosfm_dir = local_run_root / "autosfm"
+    local_refs_dir = local_autosfm_dir / "reference"
+
+    return replace(
+        run.paths,
+        autosfm_dir=local_autosfm_dir,
+        project_dir=local_autosfm_dir / "project",
+        refs_dir=local_refs_dir,
+        pixel_grid_dir=local_refs_dir / "pixel_world_grids",
+    )
+
+
+def local_scratch_root_for(exec_paths: RunPaths) -> Path:
+    """The top-level local scratch directory for this run, derived from
+    exec_paths.autosfm_dir (its parent). Used for cleanup after a run —
+    RunPaths doesn't carry a separate 'local run_root' field since only the
+    autosfm subtree is actually local.
+    """
+    return exec_paths.autosfm_dir.parent
+
+
+def sync_dir(src: Path, dst: Path) -> None:
+    """Copy the contents of src into dst. dst is created if missing; existing
+    files at the destination are overwritten. No-ops (with a warning) if src
+    is missing — callers decide whether that's an error.
+    """
+    dst.mkdir(parents=True, exist_ok=True)
+    if not src.exists():
+        log.warning(f"sync_dir: source {src} does not exist, nothing to copy.")
+        return
+
+    for item in src.iterdir():
+        target = dst / item.name
+        if item.is_dir():
+            shutil.copytree(item, target, dirs_exist_ok=True)
+        else:
+            shutil.copy2(item, target)

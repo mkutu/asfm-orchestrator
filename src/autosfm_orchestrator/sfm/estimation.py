@@ -152,7 +152,7 @@ class CameraStats():
     def to_dict(self):
         row = dict()
         row["label"] = self.camera.label
-        
+
         # Estimated location
         if self.estimated_location is not None:
             row["Estimated_X"] = self.estimated_location[0]
@@ -291,15 +291,15 @@ def rotation_transform(coord: List, R: List[List]) -> List:
     assert len(coord) == 2
 
     rotated_coord = [
-        R[0][0]*coord[0] + R[0][1]*coord[1], 
+        R[0][0]*coord[0] + R[0][1]*coord[1],
         R[1][0]*coord[0] + R[1][1]*coord[1]
     ]
-    
+
     return rotated_coord
 
 
 def add_lists(a, b):
-    
+
     assert len(a) == len(b)
     return [_a + _b for _a, _b in zip(a, b)]
 
@@ -328,7 +328,7 @@ def field_of_view(center_coords, half_width, half_height, yaw_angle):
     rotated_bottom_right = add_lists(rotated_bottom_right, center_coords)
 
     coordinates = [
-        rotated_top_right, rotated_bottom_left, 
+        rotated_top_right, rotated_bottom_left,
         rotated_top_left, rotated_bottom_right
     ]
 
@@ -340,7 +340,7 @@ def field_of_view(center_coords, half_width, half_height, yaw_angle):
     top_sort = argsort([coord[1] for coord in left_coordinates])
     bottom_left = left_coordinates[top_sort[0]]
     top_left = left_coordinates[top_sort[1]]
-    
+
     # Determine which is the top_right and bottom_right
     right_coordinates = coordinates[mask[2]], coordinates[mask[3]]
     top_sort = argsort([coord[1] for coord in right_coordinates])

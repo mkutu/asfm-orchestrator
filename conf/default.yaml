@@ -3,6 +3,7 @@ workspace:
   keep_successful_runs: true
   keep_failed_runs: true
   lock_timeout_hours: 48
+  keep_local_scratch: false
 
 database:
   write_run_status: false
@@ -56,6 +57,7 @@ globus:
   label_prefix: autosfm
 
 paths:
+  local_scratch_root: /home/mkutuga/asfm-orchestrator/temp
   sunny_staging_root: /mnt/research-projects/s/screberg/longterm_images2/semifield-asfm/staging
   sunny_staging_globus_root: /rsstu/users/s/screberg/longterm_images2/semifield-asfm/staging
   
@@ -64,27 +66,86 @@ paths:
   ceres_reference_root: /90daydata/dash_agir/semifield-utils/autosfm/GroundControlPoints
   ceres_output_root: /90daydata/dash_agir/semifield-asfm
 
+
 autosfm:
-  dry_run: true
-  metashape_key_path:
+  dry_run: false
+  metashape_key_path: .keys/pipeline_keys.yaml
+  crs: "32617"            # new — was inferred per-batch before, now explicit
+  marker_bit: "14bit"      # new — was inferred from bbot_version before
   num_gpus: 1
   use_masking: false
+  skip_first_n_images:
+  skip_last_n_images:
+  
+  
+  recover_unaligned_only: false
+  recover_rematch: false
+  align_correct: false
+
   resize_photos: true
-  downscale_factor: 0.75
+  downscale:
+    factor: 0.75
 
   detect_markers: true
   import_references: true
+
   match: true
   align: true
+  align_photos:
+    downscale: 4
+    autosave: true
+    generic_preselection: false
+    reference_preselection: false
+    filter_stationary_points: false
+    adaptive_fitting: false
+
   optimize_cameras: true
+  optimize_cameras_cfg:
+    fit_f: true
+    fit_cx: true
+    fit_cy: true
+    fit_b1: true
+    fit_b2: true
+    fit_k1: true
+    fit_k2: true
+    fit_k3: true
+    fit_k4: true
+    fit_p1: true
+    fit_p2: true
+    fit_corrections: false
+    adaptive_fitting: false
+    tiepoint_covariance: false
 
   build_depth: true
+  depth_map:
+    downscale: 4
+    filtering_mode: moderate
+    max_neighbors: -1
+    autosave: true
+
   build_dense: true
+  dense_cloud:
+    points_spacing: 0.1
+    autosave: true
+
   build_model: true
+  model:
+    autosave: true
+
   build_dem: true
+  dem:
+    autosave: true
+    export:
+      enabled: false
+
   build_ortho: true
+  orthomosaic:
+    autosave: true
+    export:
+      enabled: false
 
   export_fov: true
   export_pixel_grid: true
-  export_report: true 
-  pixel_grid_step: 100
+  pixel_grid:
+    step: 100
+  export_report: true

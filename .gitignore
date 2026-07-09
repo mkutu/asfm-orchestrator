@@ -10,3 +10,7 @@ runs/
 .vscode/
 **.sqlite3
 **.db
+
+.keys/
+
+temp/
