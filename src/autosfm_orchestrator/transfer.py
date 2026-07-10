@@ -85,6 +85,7 @@ def build_input_transfer_plan(config: dict, run: AutoSfmRun) -> list[TransferPla
 
 
 def build_output_transfer_plan(config: dict, run: AutoSfmRun) -> TransferPlan:
+    transfer_cfg = config.get("transfer", {})
     items = []
     for source in [run.paths.autosfm_dir, run.paths.logs_dir, run.paths.manifest_path]:
         if source.exists():
@@ -94,6 +95,18 @@ def build_output_transfer_plan(config: dict, run: AutoSfmRun) -> TransferPlan:
                     destination=run.ceres_output_path / source.name,
                 )
             )
+
+    if transfer_cfg.get("promote_report", False):
+        pdf_path = run.paths.outputs_dir / f"{run.run_id}_asfm_report.pdf"
+        if pdf_path.exists():
+            items.append(
+                TransferItem(
+                    source=pdf_path,
+                    destination=run.ceres_output_path / pdf_path.name,
+                )
+            )
+        else:
+            log.warning("promote_report=true but report not found at %s", pdf_path)
 
     return TransferPlan(
         label=f"{config['globus'].get('label_prefix', 'autosfm')}-promote-{run.run_id}",

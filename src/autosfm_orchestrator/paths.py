@@ -11,6 +11,18 @@ from autosfm_orchestrator.utils import sanitize_for_path
 log = logging.getLogger(__name__)
 
 
+def remove_staged_images(paths: RunPaths) -> None:
+    """Delete the staged full-resolution input images from NFS staging
+    (paths.images_dir) after a successful run + promotion, to avoid
+    accumulating large duplicated imagery on NFS. Only removes images_dir --
+    reference_dir, autosfm outputs, logs, and the manifest are left alone.
+    """
+    if not paths.images_dir.exists():
+        log.info("remove_staged_images: %s does not exist, nothing to remove.", paths.images_dir)
+        return
+    log.info("Removing staged NFS input images: %s", paths.images_dir)
+    shutil.rmtree(paths.images_dir, ignore_errors=True)
+
 def make_run_id(entry: ManualLogEntry) -> str:
     start = sanitize_for_path(entry.start_time.replace(":", ""))
     end = sanitize_for_path(entry.end_time.replace(":", ""))

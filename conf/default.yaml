@@ -4,6 +4,7 @@ workspace:
   keep_failed_runs: true
   lock_timeout_hours: 48
   keep_local_scratch: false
+  cleanup_staged_images: false  # delete staged images from NFS staging after a successful run
 
 database:
   write_run_status: false
@@ -47,6 +48,7 @@ manual_log:
 transfer:
   stage_inputs: true      # set false to skip re-staging — assumes run.paths already has images/reference
   promote_outputs: true   # set false to skip promoting outputs to CERES
+  promote_report: true    # include PDF report in output promotion to CERES
 
 globus:
   enabled: true

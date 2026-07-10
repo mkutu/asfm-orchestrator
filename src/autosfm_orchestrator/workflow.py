@@ -8,7 +8,7 @@ from autosfm_orchestrator.autosfm import AutoSfmRunner
 from autosfm_orchestrator.db import InventoryDb, ensure_records_found
 from autosfm_orchestrator.manual_log import read_manual_log
 from autosfm_orchestrator.models import AutoSfmRun, ManualLogEntry
-from autosfm_orchestrator.paths import build_run, create_workspace
+from autosfm_orchestrator.paths import build_run, create_workspace, remove_staged_images
 from autosfm_orchestrator.staging import locked_workspace
 from autosfm_orchestrator.transfer import (
     build_input_transfer_plan,
@@ -85,6 +85,7 @@ def execute_run(config: dict, run: AutoSfmRun) -> AutoSfmRun:
     transfer_cfg = config.get("transfer", {})
     stage_inputs = transfer_cfg.get("stage_inputs", True)
     promote_outputs = transfer_cfg.get("promote_outputs", True)
+    cleanup_staged_images = config.get("workspace", {}).get("cleanup_staged_images", False)
 
     with locked_workspace(run):
         try:
@@ -112,6 +113,11 @@ def execute_run(config: dict, run: AutoSfmRun) -> AutoSfmRun:
                 execute_transfer(config, output_plan)
             else:
                 log.info("transfer.promote_outputs=false -- skipping output promotion to CERES")
+
+            if cleanup_staged_images:
+                remove_staged_images(run.paths)                
+            else:
+                log.info("workspace.cleanup_staged_images=false -- leaving staged NFS images in place")
 
             run.status = "success"
             write_manifest(run, status="success")
