@@ -169,13 +169,12 @@ class MetashapePipeline:
         for this run (filename varies, e.g. GroundControlPoints_NC_32617_...).
         """
         candidates = sorted(self.reference_dir.glob("*.csv"))
-        if not candidates:
+        if len(candidates) == 0:
             raise MetashapePipelineError(f"No reference CSV found in {self.reference_dir}")
         if len(candidates) > 1:
-            log.warning(
-                "Multiple reference CSVs found in %s, using first: %s",
-                self.reference_dir,
-                candidates[0].name,
+            raise MetashapePipelineError(
+                f"Expected exactly one reference CSV in {self.reference_dir}, found {len(candidates)}: "
+                f"{[c.name for c in candidates]}"
             )
         return candidates[0]
 
@@ -707,9 +706,6 @@ class MetashapePipeline:
         if self.gcp_reference is None:
             self.export_gcp_reference()
 
-        assert self.camera_reference is not None, "export_camera_reference() failed to set camera_reference"
-        assert self.gcp_reference is not None, "export_gcp_reference() failed to set gcp_reference"
-
         total_cameras = len(self.doc.chunk.cameras)
         aligned_cameras = sum(row["Alignment"] for row in self.camera_reference.content_dict)
         percentage_aligned = aligned_cameras / total_cameras if total_cameras else 0.0
@@ -866,11 +862,12 @@ class MetashapePipeline:
     def run(self) -> None:
         cfg = self.cfg
 
-        if cfg.get("resize_photos"):
-            self.resize_photos()
-            self.add_photos(self.downscaled_dir)
-        else:
-            self.add_photos()
+        if cfg.get("add_photos", True):
+            if cfg.get("resize_photos"):
+                self.resize_photos()
+                self.add_photos(self.downscaled_dir)
+            else:
+                self.add_photos()
 
         if cfg.get("detect_markers"):
             self.detect_markers()

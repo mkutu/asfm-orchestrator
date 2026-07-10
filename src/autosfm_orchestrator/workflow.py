@@ -81,21 +81,37 @@ def _plan_entry(config: dict, entry: ManualLogEntry) -> AutoSfmRun:
 
 def execute_run(config: dict, run: AutoSfmRun) -> AutoSfmRun:
     db = InventoryDb(config["database"]["path"], config=config)
+
+    transfer_cfg = config.get("transfer", {})
+    stage_inputs = transfer_cfg.get("stage_inputs", True)
+    promote_outputs = transfer_cfg.get("promote_outputs", True)
+
     with locked_workspace(run):
         try:
             _safe_upsert_run_status(db, run, "running")
             write_manifest(run, status="running")
 
-            input_plans = build_input_transfer_plan(config, run)
-            for plan in input_plans:
-                execute_transfer(config, plan)
+            if stage_inputs:
+                input_plans = build_input_transfer_plan(config, run)
+                for plan in input_plans:
+                    execute_transfer(config, plan)
+            else:
+                log.info(
+                    "transfer.stage_inputs=false -- skipping input staging, "
+                    "assuming %s is already populated from a prior run",
+                    run.paths.inputs_dir,
+                )
 
             outputs = AutoSfmRunner(config).run(run)
             log.info("AutoSfM outputs: %s", asdict(outputs))
 
             write_manifest(run, status="autosfm_complete")
-            output_plan = build_output_transfer_plan(config, run)
-            execute_transfer(config, output_plan)
+
+            if promote_outputs:
+                output_plan = build_output_transfer_plan(config, run)
+                execute_transfer(config, output_plan)
+            else:
+                log.info("transfer.promote_outputs=false -- skipping output promotion to CERES")
 
             run.status = "success"
             write_manifest(run, status="success")

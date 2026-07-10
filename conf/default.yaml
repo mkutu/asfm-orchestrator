@@ -44,9 +44,13 @@ manual_log:
     - season
     - process
 
+transfer:
+  stage_inputs: true      # set false to skip re-staging — assumes run.paths already has images/reference
+  promote_outputs: true   # set false to skip promoting outputs to CERES
+
 globus:
-  enabled: false
-  dry_run: true
+  enabled: true
+  dry_run: false
   wait_for_completion: true
   timeout_seconds:          # leave blank for no timeout
   
@@ -57,6 +61,8 @@ globus:
   label_prefix: autosfm
 
 paths:
+  ncsu_share_root: /mnt/research-projects/s/screberg
+  ncsu_share_globus_root: /rsstu/users/s/screberg
   local_scratch_root: /home/mkutuga/asfm-orchestrator/temp
   sunny_staging_root: /mnt/research-projects/s/screberg/longterm_images2/semifield-asfm/staging
   sunny_staging_globus_root: /rsstu/users/s/screberg/longterm_images2/semifield-asfm/staging
@@ -81,6 +87,8 @@ autosfm:
   recover_unaligned_only: false
   recover_rematch: false
   align_correct: false
+
+  add_photos: true
 
   resize_photos: true
   downscale:

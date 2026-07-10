@@ -103,13 +103,14 @@ def build_output_transfer_plan(config: dict, run: AutoSfmRun) -> TransferPlan:
     )
 
 
-def _can_local_copy(plan: TransferPlan) -> bool:
+def _can_local_copy(plan: TransferPlan, config: dict) -> bool:
     """Return True only when all sources and destinations are locally reachable."""
     if not plan.items:
         return False
 
     for item in plan.items:
-        if not item.source.exists():
+        local_source = to_local_path(item.source, config)
+        if not local_source.exists():
             return False
 
         # Important: do not treat remote CERES paths as local.
@@ -120,53 +121,96 @@ def _can_local_copy(plan: TransferPlan) -> bool:
     return True
 
 
-def _local_copy_when_possible(plan: TransferPlan) -> None:
+def _local_copy_when_possible(plan: TransferPlan, config: dict) -> None:
     """Direct filesystem copy -- used for dry-run-local-visible tests and for
-    same-endpoint plans where a Globus transfer would be pointless."""
+    same-endpoint plans where a Globus transfer would be pointless.
+
+    item.source may be in Globus-collection space rather than local-mount
+    space -- anything sourced from globus_file_index (e.g. the GCP reference
+    file's ReferenceRecord.source_path) is stored that way, since that's how
+    the crawler indexes it. It must be translated via to_local_path() before
+    any filesystem call, or .exists()/shutil.copy2 silently look in the
+    wrong place (e.g. /rsstu/... instead of /mnt/research-projects/...).
+    item.destination is always a path we constructed ourselves under
+    run.paths, so it's already local and needs no translation.
+    """
     copied = 0
     for item in plan.items:
-        if not item.source.exists():
-            log.warning("Skipping copy, source not found: %s", item.source)
+        local_source = to_local_path(item.source, config)
+        if not local_source.exists():
+            log.warning(
+                "Skipping copy, source not found: %s (translated from %s)",
+                local_source, item.source,
+            )
             continue
         item.destination.parent.mkdir(parents=True, exist_ok=True)
-        if item.source.is_dir():
-            shutil.copytree(item.source, item.destination, dirs_exist_ok=True)
+        if local_source.is_dir():
+            shutil.copytree(local_source, item.destination, dirs_exist_ok=True)
         else:
-            shutil.copy2(item.source, item.destination)
+            shutil.copy2(local_source, item.destination)
         copied += 1
     if copied:
         log.info("Local copy completed for %s/%s items (%s)", copied, len(plan.items), plan.label)
 
 
 # ---------------------------------------------------------------------------
-# Local filesystem path -> Globus collection path translation
+# Local filesystem path <-> Globus collection path translation
 #
 # A path that's locally mounted (e.g. via autofs/NFS) is not necessarily the
 # same path the Globus Connect Server collection exposes for that same file.
 # Confirmed on SUNNY:
-#   local:  /mnt/research-projects/s/screberg/longterm_images2/autosfm_staging
-#   globus: /rsstu/users/s/screberg/longterm_images2/autosfm_staging
+#   local:  /mnt/research-projects/s/screberg
+#   globus: /rsstu/users/s/screberg
 #
-# paths.sunny_staging_root / paths.sunny_staging_globus_root in config define
-# this single fixed mapping. Paths that don't start with sunny_staging_root
-# (e.g. CERES /90daydata paths, or reference sources pulled straight from
-# globus_file_index.full_path) pass through unchanged.
+# paths.ncsu_share_root / paths.ncsu_share_globus_root define this mapping
+# for the whole NCSU research-projects share -- covers the GCP reference
+# tree (.../semifield-utils/autosfm/GroundControlPoints/...) as well as the
+# autosfm_staging subtree.
+#
+# paths.sunny_staging_root / paths.sunny_staging_globus_root remain as the
+# narrower, staging-specific pair (kept for backward compatibility / in case
+# the share-wide mapping ever needs to differ for the staging subtree).
+# ncsu_share_root is tried first since it's the more general mapping.
+#
+# Paths that don't start with either local_root (for to_globus_path) or
+# either globus_root (for to_local_path) -- e.g. CERES /90daydata paths --
+# pass through unchanged.
 # ---------------------------------------------------------------------------
+
+def _root_pairs(config: dict) -> list[tuple[str, str]]:
+    paths_cfg = config.get("paths", {})
+    raw_pairs = [
+        (paths_cfg.get("ncsu_share_root"), paths_cfg.get("ncsu_share_globus_root")),
+        (paths_cfg.get("sunny_staging_root"), paths_cfg.get("sunny_staging_globus_root")),
+    ]
+    return [
+        (str(local).rstrip("/"), str(globus).rstrip("/"))
+        for local, globus in raw_pairs
+        if local and globus
+    ]
+
 
 def to_globus_path(path: Path, config: dict) -> str:
     """Translate a local filesystem path to the path Globus should use, if needed."""
-    paths_cfg = config.get("paths", {})
-    local_root = paths_cfg.get("sunny_staging_root")
-    globus_root = paths_cfg.get("sunny_staging_globus_root")
     path_str = str(path)
-
-    if local_root and globus_root:
-        local_root = str(local_root).rstrip("/")
-        globus_root = str(globus_root).rstrip("/")
+    for local_root, globus_root in _root_pairs(config):
         if path_str == local_root or path_str.startswith(local_root + "/"):
             return globus_root + path_str[len(local_root):]
-
     return path_str
+
+
+def to_local_path(path: Path, config: dict) -> Path:
+    """Inverse of to_globus_path: translate a Globus-collection-space path
+    back to the path SUNNY's own filesystem actually sees it at, if needed.
+    Required before any local filesystem operation (.exists(), shutil.copy2,
+    etc.) on a path sourced from globus_file_index / a ReferenceRecord,
+    since those are stored in Globus-collection form, not local-mount form.
+    """
+    path_str = str(path)
+    for local_root, globus_root in _root_pairs(config):
+        if path_str == globus_root or path_str.startswith(globus_root + "/"):
+            return Path(local_root + path_str[len(globus_root):])
+    return Path(path_str)
 
 
 def _parse_task_id(cli_output: str) -> str | None:
@@ -260,9 +304,9 @@ def execute_transfer(config: dict, plan: TransferPlan) -> None:
         if dry_run:
             log.info("Same-endpoint dry run: %s (%s items)", plan.label, len(plan.items))
             for item in plan.items:
-                log.info("  %s -> %s", item.source, item.destination)
+                log.info("  %s -> %s", to_local_path(item.source, config), item.destination)
             return
-        _local_copy_when_possible(plan)
+        _local_copy_when_possible(plan, config)
         return
 
     if dry_run:
@@ -279,8 +323,8 @@ def execute_transfer(config: dict, plan: TransferPlan) -> None:
             _wait_for_task(config, task_id)
         return
 
-    if _can_local_copy(plan):
-        _local_copy_when_possible(plan)
+    if _can_local_copy(plan, config):
+        _local_copy_when_possible(plan, config)
         return
 
     raise NotImplementedError(
