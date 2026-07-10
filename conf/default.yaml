@@ -3,8 +3,12 @@ workspace:
   keep_local_scratch: true  # set false to delete local scratch after each run
   cleanup_staged_images: false  # delete staged images from NFS staging after a successful run
 
+run_status_db:
+  enabled: false
+  db_path: /mnt/research-projects/s/screberg/longterm_images2/semifield-asfm/db/autosfm_run_status.sqlite3
+  promote_to_juno: false
+
 database:
-  write_run_status: true
   path: /home/mkutuga/asfm-orchestrator/db/globus_file_index.sqlite3
 
   # Filters for selecting current developed JPGs from globus_file_index.
@@ -44,10 +48,10 @@ manual_log:
 
 transfer:
   stage_inputs: false      # set false to skip re-staging — assumes run.paths already has images/reference
-  promote_outputs: true   # set false to skip promoting outputs to CERES
+  promote_outputs: false   # set false to skip promoting outputs to CERES
 
 globus:
-  enabled: true
+  enabled: false
   dry_run: false
   wait_for_completion: true
   timeout_seconds:          # leave blank for no timeout
@@ -55,6 +59,7 @@ globus:
   cli: globus
   ceres_endpoint: f45a24f8-09ba-11ec-b342-1feaf93e3729
   ncsu_endpoint: 2f7f6170-8d5c-11e9-8e6a-029d279f7e24
+  juno_endpoint: 904c2108-90cf-11e8-9672-0a6d4e044368
   poll_seconds: 30
   label_prefix: autosfm
 
@@ -70,9 +75,12 @@ paths:
   ceres_reference_root: /90daydata/dash_agir/semifield-utils/autosfm/GroundControlPoints
   ceres_output_root: /90daydata/dash_agir/semifield-asfm
 
+  # JUNO-side root as seen by the JUNO Globus endpoint.
+  juno_db_root: /LTS/project/dash_agir/semifield-asfm/db
+
 
 autosfm:
-  dry_run: false
+  dry_run: true
   metashape_key_path: .keys/pipeline_keys.yaml
   crs: "32617"            # new — was inferred per-batch before, now explicit
   marker_bit: "14bit"      # new — was inferred from bbot_version before

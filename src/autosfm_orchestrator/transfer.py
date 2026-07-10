@@ -84,6 +84,18 @@ def build_input_transfer_plan(config: dict, run: AutoSfmRun) -> list[TransferPla
     return plans
 
 
+def build_db_promotion_transfer_plan(config: dict) -> TransferPlan:
+    """Build a transfer plan to promote the run-status DB file to JUNO."""
+    db_path = Path(config["run_status_db"]["db_path"])
+    juno_path = Path(config["paths"]["juno_db_root"]) / db_path.name
+    return TransferPlan(
+        label=f"{config['globus'].get('label_prefix', 'autosfm')}-promote-run-status-db",
+        source_endpoint=config["globus"]["ncsu_endpoint"],
+        destination_endpoint=config["globus"]["juno_endpoint"],
+        items=[TransferItem(source=db_path, destination=juno_path)],
+    )
+
+
 def build_output_transfer_plan(config: dict, run: AutoSfmRun) -> TransferPlan:
     pdf_path = run.paths.outputs_dir / f"{run.run_id}_asfm_report.pdf"
     sources = [run.paths.autosfm_dir, run.paths.logs_dir, run.paths.manifest_path, pdf_path]

@@ -5,12 +5,13 @@ from dataclasses import asdict
 from pathlib import Path
 
 from autosfm_orchestrator.autosfm import AutoSfmRunner
-from autosfm_orchestrator.db import InventoryDb, ensure_records_found
+from autosfm_orchestrator.db import AsfmRunStatusDb, InventoryDb, ensure_records_found
 from autosfm_orchestrator.manual_log import read_manual_log
 from autosfm_orchestrator.models import AutoSfmRun, ManualLogEntry
 from autosfm_orchestrator.paths import build_run, create_workspace, remove_staged_images
 from autosfm_orchestrator.staging import locked_workspace
 from autosfm_orchestrator.transfer import (
+    build_db_promotion_transfer_plan,
     build_input_transfer_plan,
     build_output_transfer_plan,
     execute_transfer,
@@ -80,7 +81,12 @@ def _plan_entry(config: dict, entry: ManualLogEntry) -> AutoSfmRun:
 
 
 def execute_run(config: dict, run: AutoSfmRun) -> AutoSfmRun:
-    db = InventoryDb(config["database"]["path"], config=config)
+    run_status_db = AsfmRunStatusDb(
+        config.get("run_status_db", {}).get(
+            "db_path", "/mnt/research-projects/s/screberg/longterm_images2/semifield-asfm/db/autosfm_run_status.sqlite3"
+        ),
+        config=config,
+    )
 
     transfer_cfg = config.get("transfer", {})
     stage_inputs = transfer_cfg.get("stage_inputs", True)
@@ -89,7 +95,7 @@ def execute_run(config: dict, run: AutoSfmRun) -> AutoSfmRun:
 
     with locked_workspace(run):
         try:
-            _safe_upsert_run_status(db, run, "running")
+            _safe_upsert_run_status(run_status_db, run, "running")
             write_manifest(run, status="running")
 
             if stage_inputs:
@@ -121,17 +127,30 @@ def execute_run(config: dict, run: AutoSfmRun) -> AutoSfmRun:
 
             run.status = "success"
             write_manifest(run, status="success")
-            _safe_upsert_run_status(db, run, "success")
+            _safe_upsert_run_status(run_status_db, run, "success")
+            _promote_run_status_db(config)
             return run
         except Exception as exc:
             run.status = "failed"
             write_manifest(run, status="failed", message=str(exc))
-            _safe_upsert_run_status(db, run, "failed", message=str(exc))
+            _safe_upsert_run_status(run_status_db, run, "failed", message=str(exc))
+            _promote_run_status_db(config)
             raise
 
 
+def _promote_run_status_db(config: dict) -> None:
+    db_cfg = config.get("run_status_db", {})
+    if not db_cfg.get("enabled", False) or not db_cfg.get("promote_to_juno", False):
+        return
+    try:
+        plan = build_db_promotion_transfer_plan(config)
+        execute_transfer(config, plan)
+    except Exception as exc:
+        log.warning("Could not promote run-status DB to JUNO: %s", exc)
+
+
 def _safe_upsert_run_status(
-    db: InventoryDb,
+    db: AsfmRunStatusDb,
     run: AutoSfmRun,
     status: str,
     message: str | None = None,

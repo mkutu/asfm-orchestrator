@@ -219,16 +219,70 @@ class InventoryDb:
         with self.connect() as conn:
             return [dict(row) for row in conn.execute(query, (batch_id,)).fetchall()]
 
-    def upsert_run_status(self, run: AutoSfmRun, status: str, message: str | None = None) -> None:
-        """Record AutoSfM orchestration status in the same SQLite DB.
+    def _row_to_image_record(self, row: sqlite3.Row) -> ImageRecord:
+        return ImageRecord(
+            batch_id=row["batch_id"],
+            image_id=Path(row["file_name"]).stem,
+            filename=row["file_name"],
+            source_path=Path(row["full_path"]),
+            timestamp=row["fname_ts_epoch"],
+            file_id=row["file_id"],
+            endpoint=row["endpoint"],
+            site=row["site"],
+            storage_domain=row["storage_domain"],
+            namespace=row["namespace"],
+            storage_root=Path(row["storage_root"]),
+            rel_path=Path(row["rel_path"]),
+            data_state=row["data_state"],
+            size_bytes=row["size_bytes"],
+            mtime_iso=row["mtime_iso"],
+        )
 
-        The nightly inventory tables remain untouched. This creates a small
-        operational table for this app if it does not already exist.
-        """
-        if not self.config.get("database", {}).get("write_run_status", False):
+    def _inventory_filters(self) -> dict:
+        return {
+            **self.config.get("database", {}).get("inventory_filters", {}),
+            **self.config.get("inventory_filters", {}),
+        }
+
+    def _reference_filters(self) -> dict:
+        base = self.config.get("database", {}).get("reference_filters", {}).copy()
+        base.update(self.config.get("reference_filters", {}))
+        return base
+
+
+    @staticmethod
+    def _add_optional_scope_filters(clauses: list[str], params: dict[str, object], filters: dict) -> None:
+        optional_columns = ["endpoint", "site", "storage_domain", "namespace", "storage_root"]
+        for column in optional_columns:
+            value = filters.get(column)
+            if value in (None, ""):
+                continue
+            clauses.append(f"{column} = :{column}")
+            params[column] = value
+
+
+class AsfmRunStatusDb:
+    """SQLite run-status tracker written on SUNNY and promoted to JUNO.
+
+    Lives on NFS (accessible from SUNNY). The database file and its parent
+    directory are created on first write. Never written from SciNet/JUNO.
+    """
+
+    def __init__(self, db_path: str | Path, config: dict | None = None):
+        self.db_path = Path(db_path).expanduser()
+        self.config = config or {}
+
+    def connect(self) -> sqlite3.Connection:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def upsert_run_status(self, run: AutoSfmRun, status: str, message: str | None = None) -> None:
+        """Record AutoSfM run status, creating the database and table if needed."""
+        if not self.config.get("run_status_db", {}).get("enabled", False):
             log.debug(
-                "Skipping SQLite autosfm run status update because "
-                "database.write_run_status=false"
+                "Skipping run status DB update because run_status_db.enabled=false"
             )
             return
         
@@ -285,48 +339,7 @@ class InventoryDb:
                 )
                 conn.commit()
         except Exception as exc:
-            log.warning("Could not update autosfm run status in SQLite: %s", exc)
-
-    def _row_to_image_record(self, row: sqlite3.Row) -> ImageRecord:
-        return ImageRecord(
-            batch_id=row["batch_id"],
-            image_id=Path(row["file_name"]).stem,
-            filename=row["file_name"],
-            source_path=Path(row["full_path"]),
-            timestamp=row["fname_ts_epoch"],
-            file_id=row["file_id"],
-            endpoint=row["endpoint"],
-            site=row["site"],
-            storage_domain=row["storage_domain"],
-            namespace=row["namespace"],
-            storage_root=Path(row["storage_root"]),
-            rel_path=Path(row["rel_path"]),
-            data_state=row["data_state"],
-            size_bytes=row["size_bytes"],
-            mtime_iso=row["mtime_iso"],
-        )
-
-    def _inventory_filters(self) -> dict:
-        return {
-            **self.config.get("database", {}).get("inventory_filters", {}),
-            **self.config.get("inventory_filters", {}),
-        }
-
-    def _reference_filters(self) -> dict:
-        base = self.config.get("database", {}).get("reference_filters", {}).copy()
-        base.update(self.config.get("reference_filters", {}))
-        return base
-
-
-    @staticmethod
-    def _add_optional_scope_filters(clauses: list[str], params: dict[str, object], filters: dict) -> None:
-        optional_columns = ["endpoint", "site", "storage_domain", "namespace", "storage_root"]
-        for column in optional_columns:
-            value = filters.get(column)
-            if value in (None, ""):
-                continue
-            clauses.append(f"{column} = :{column}")
-            params[column] = value
+            log.warning("Could not update run status in SQLite: %s", exc)
 
 
 def ensure_records_found(records: Iterable[ImageRecord], batch_id: str) -> list[ImageRecord]:
