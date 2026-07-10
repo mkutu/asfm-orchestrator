@@ -1,13 +1,10 @@
 workspace:
   root: /home/mkutuga/asfm-orchestrator
-  keep_successful_runs: true
-  keep_failed_runs: true
-  lock_timeout_hours: 48
-  keep_local_scratch: false
+  keep_local_scratch: true  # set false to delete local scratch after each run
   cleanup_staged_images: false  # delete staged images from NFS staging after a successful run
 
 database:
-  write_run_status: false
+  write_run_status: true
   path: /home/mkutuga/asfm-orchestrator/db/globus_file_index.sqlite3
 
   # Filters for selecting current developed JPGs from globus_file_index.
@@ -46,9 +43,8 @@ manual_log:
     - process
 
 transfer:
-  stage_inputs: true      # set false to skip re-staging — assumes run.paths already has images/reference
+  stage_inputs: false      # set false to skip re-staging — assumes run.paths already has images/reference
   promote_outputs: true   # set false to skip promoting outputs to CERES
-  promote_report: true    # include PDF report in output promotion to CERES
 
 globus:
   enabled: true
