@@ -92,7 +92,7 @@ autosfm:
 
   resize_photos: true
   downscale:
-    factor: 0.75
+    factor: 0.25
 
   detect_markers: true
   import_references: true
@@ -100,7 +100,7 @@ autosfm:
   match: true
   align: true
   align_photos:
-    downscale: 4
+    downscale: 1
     autosave: true
     generic_preselection: false
     reference_preselection: false
