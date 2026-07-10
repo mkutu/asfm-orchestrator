@@ -148,8 +148,7 @@ def make_execution_paths(config: dict, run: AutoSfmRun) -> RunPaths:
     / final-output concerns (locking, the manifest, promoted outputs), not
     Metashape compute scratch.
     """
-    scratch_root = Path(config["paths"]["local_scratch_root"]).expanduser()
-    local_run_root = scratch_root / run.batch_id / run.sub_batch_id
+    local_run_root = local_run_root_for(config, run.batch_id, run.sub_batch_id)
     local_autosfm_dir = local_run_root / "autosfm"
     local_refs_dir = local_autosfm_dir / "reference"
 
@@ -161,6 +160,57 @@ def make_execution_paths(config: dict, run: AutoSfmRun) -> RunPaths:
         pixel_grid_dir=local_refs_dir / "pixel_world_grids",
         pixel_grid_samples_dir=local_refs_dir / "pixel_grid_samples",
     )
+
+
+def local_run_root_for(config: dict, batch_id: str, sub_batch_id: str) -> Path:
+    """The local-scratch root directory for a given batch/sub-batch, e.g.
+    config["paths"]["local_scratch_root"] / batch_id / sub_batch_id. Shared
+    by make_execution_paths (Metashape compute scratch) and workflow.py
+    (local copy of the run's log file), so both agree on where a run's
+    local-disk files live.
+    """
+    scratch_root = Path(config["paths"]["local_scratch_root"]).expanduser()
+    return scratch_root / batch_id / sub_batch_id
+
+
+def local_log_path_for(config: dict, run: AutoSfmRun) -> Path:
+    """Where the local-scratch copy of a run's log file lives, mirroring the
+    batch_id/sub_batch_id structure used by make_execution_paths, e.g.
+    <local_scratch_root>/<batch_id>/<sub_batch_id>/logs/<run_id>.log.
+    """
+    local_run_root = local_run_root_for(config, run.batch_id, run.sub_batch_id)
+    return local_run_root / "logs" / f"{run.run_id.replace('/', '_')}.log"
+
+
+def prune_dir_keep_only(root: Path, keep_paths: list[Path]) -> None:
+    """Delete everything under root except keep_paths.
+
+    Used to honor workspace.keep_local_report: when keep_local_scratch is
+    false but keep_local_report is true, we still want to wipe local scratch
+    (the .psx project, depth maps, dense cloud, resized photos, etc.) but
+    leave the local report file and reference folder in place. Ancestor
+    directories of a kept path are preserved (pruned of their other
+    children) so the surviving paths remain valid; anything unrelated to a
+    kept path is removed outright. keep_paths that don't exist are ignored.
+    """
+    if not root.exists():
+        return
+    resolved_keep = [p.resolve() for p in keep_paths if p.exists()]
+
+    def _prune(current: Path) -> None:
+        for entry in list(current.iterdir()):
+            entry_r = entry.resolve()
+            if entry_r in resolved_keep:
+                continue
+            if any(kp.is_relative_to(entry_r) for kp in resolved_keep):
+                _prune(entry)
+            else:
+                if entry.is_dir():
+                    shutil.rmtree(entry, ignore_errors=True)
+                else:
+                    entry.unlink(missing_ok=True)
+
+    _prune(root)
 
 
 def local_scratch_root_for(exec_paths: RunPaths) -> Path:

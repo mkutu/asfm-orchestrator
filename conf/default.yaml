@@ -4,6 +4,9 @@ workspace:
   keep_local_report: true  # set false to delete local reports after each run, if keep_local_scratch is true this has no effect
   cleanup_staged_images: true  # delete staged images from NFS staging after a successful run
 
+logging:
+  level: INFO  # level for the per-run log file written to <run_root>/logs/, which is promoted to CERES with the rest of the run's outputs
+
 run_status_db:
   enabled: false
   db_path: /mnt/research-projects/s/screberg/longterm_images2/semifield-asfm/db/autosfm_run_status.sqlite3

@@ -8,7 +8,7 @@ from autosfm_orchestrator.autosfm import AutoSfmRunner
 from autosfm_orchestrator.db import AsfmRunStatusDb, InventoryDb, ensure_records_found
 from autosfm_orchestrator.manual_log import read_manual_log
 from autosfm_orchestrator.models import AutoSfmRun, ManualLogEntry
-from autosfm_orchestrator.paths import build_run, create_workspace, remove_staged_images
+from autosfm_orchestrator.paths import build_run, create_workspace, local_log_path_for, remove_staged_images
 from autosfm_orchestrator.staging import locked_workspace
 from autosfm_orchestrator.transfer import (
     build_db_promotion_transfer_plan,
@@ -16,7 +16,7 @@ from autosfm_orchestrator.transfer import (
     build_output_transfer_plan,
     execute_transfer,
 )
-from autosfm_orchestrator.utils import normalize_time_str, write_yaml
+from autosfm_orchestrator.utils import log_to_file, normalize_time_str, write_yaml
 
 log = logging.getLogger(__name__)
 
@@ -93,7 +93,11 @@ def execute_run(config: dict, run: AutoSfmRun) -> AutoSfmRun:
     promote_outputs = transfer_cfg.get("promote_outputs", True)
     cleanup_staged_images = config.get("workspace", {}).get("cleanup_staged_images", False)
 
-    with locked_workspace(run):
+    log_level = config.get("logging", {}).get("level", "INFO")
+    run_log_path = run.paths.logs_dir / f"{run.run_id.replace('/', '_')}.log"
+    local_run_log_path = local_log_path_for(config, run)
+
+    with locked_workspace(run), log_to_file([run_log_path, local_run_log_path], level=log_level):
         try:
             _safe_upsert_run_status(run_status_db, run, "running")
             write_manifest(run, status="running")

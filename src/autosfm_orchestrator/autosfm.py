@@ -5,7 +5,13 @@ import shutil
 from pathlib import Path
 
 from autosfm_orchestrator.models import AutoSfmOutputs, AutoSfmRun
-from autosfm_orchestrator.paths import create_workspace, local_scratch_root_for, make_execution_paths, sync_dir
+from autosfm_orchestrator.paths import (
+    create_workspace,
+    local_scratch_root_for,
+    make_execution_paths,
+    prune_dir_keep_only,
+    sync_dir,
+)
 from autosfm_orchestrator.sfm.metashape_pipeline import MetashapePipeline
 from autosfm_orchestrator.utils import write_yaml
 
@@ -120,12 +126,33 @@ class AutoSfmRunner:
             log.warning("Expected report at %s but it was not written.", pipeline.report_path)
 
         local_run_root = local_scratch_root_for(exec_paths)
-        keep_local_scratch = self.workspace_config.get("keep_local_scratch", False)
-        if not keep_local_scratch:
-            log.info("Removing local scratch run directory %s", local_run_root)
-            shutil.rmtree(local_run_root, ignore_errors=True)
+        local_logs_dir = local_run_root / "logs"
+        # Only ever remove local scratch when workspace.keep_local_scratch is
+        # *explicitly* false. Any other value (missing key, true, or
+        # anything else) means "keep everything" -- we never want to
+        # silently delete local scratch based on an assumption about a
+        # missing/misconfigured setting. keep_local_report only matters once
+        # we're in the explicit-false branch; when keep_local_scratch is
+        # true it has no effect (everything, including the report, is kept
+        # already). The local copy of the run's log file (local_logs_dir) is
+        # always preserved regardless of these settings -- it's what makes
+        # the run reviewable on SUNNY without touching the NFS mount.
+        keep_local_scratch = self.workspace_config.get("keep_local_scratch")
+        if keep_local_scratch is not False:
+            log.info(
+                "Keeping local scratch run directory %s (workspace.keep_local_scratch is not explicitly false)",
+                local_run_root,
+            )
+        elif self.workspace_config.get("keep_local_report", False):
+            log.info(
+                "Removing local scratch run directory %s, keeping local report, reference folder, "
+                "and local log (workspace.keep_local_scratch=false, workspace.keep_local_report=true)",
+                local_run_root,
+            )
+            prune_dir_keep_only(local_run_root, [pipeline.report_path, exec_paths.refs_dir, local_logs_dir])
         else:
-            log.info("Keeping local scratch run directory %s (workspace.keep_local_scratch=true)", local_run_root)
+            log.info("Removing local scratch run directory %s, keeping local log", local_run_root)
+            prune_dir_keep_only(local_run_root, [local_logs_dir])
 
         # project_dir reported here points at local scratch, which may already
         # be gone by the time anything reads AutoSfmOutputs if keep_local_scratch
