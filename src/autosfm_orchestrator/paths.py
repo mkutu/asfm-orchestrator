@@ -50,6 +50,7 @@ def make_run_paths(config: dict, entry: ManualLogEntry) -> RunPaths:
         project_dir=autosfm_dir / "project",
         refs_dir=refs_dir,
         pixel_grid_dir=refs_dir / "pixel_world_grids",
+        pixel_grid_samples_dir=refs_dir / "pixel_grid_samples",
         logs_dir=run_root / "logs",
         outputs_dir=run_root / "outputs",
     )
@@ -108,6 +109,7 @@ def create_workspace(paths: RunPaths) -> None:
         paths.project_dir,
         paths.refs_dir,
         paths.pixel_grid_dir,
+        paths.pixel_grid_samples_dir,
         paths.logs_dir,
         paths.outputs_dir,
     ]:
@@ -136,8 +138,8 @@ def make_execution_paths(config: dict, run: AutoSfmRun) -> RunPaths:
     land locally. reference_dir is a single small CSV, cheap enough to read
     directly off NFS too.
 
-    autosfm_dir / project_dir / refs_dir / pixel_grid_dir are redirected to
-    local scratch (config["paths"]["local_scratch_root"]), since that's
+    autosfm_dir / project_dir / refs_dir / pixel_grid_dir / pixel_grid_samples_dir
+    are redirected to local scratch (config["paths"]["local_scratch_root"]), since that's
     where Metashape does its heavy I/O: the .psx project file, depth maps,
     dense cloud, and the resized photos themselves.
 
@@ -157,6 +159,7 @@ def make_execution_paths(config: dict, run: AutoSfmRun) -> RunPaths:
         project_dir=local_autosfm_dir / "project",
         refs_dir=local_refs_dir,
         pixel_grid_dir=local_refs_dir / "pixel_world_grids",
+        pixel_grid_samples_dir=local_refs_dir / "pixel_grid_samples",
     )
 
 

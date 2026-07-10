@@ -5,7 +5,8 @@ against the actual source. This version knows nothing about SQLite, Globus,
 or manual logs — it only receives:
 
   - a RunPaths (paths.images_dir, paths.reference_dir, paths.autosfm_dir,
-    paths.project_dir, paths.refs_dir, paths.pixel_grid_dir)
+    paths.project_dir, paths.refs_dir, paths.pixel_grid_dir,
+    paths.pixel_grid_samples_dir)
   - the `autosfm` config block from conf/default.yaml
   - run_id / batch_id as plain strings
 
@@ -35,6 +36,7 @@ from typing import Callable, Tuple
 
 import numpy as np
 import yaml
+from PIL import Image
 from tqdm import tqdm
 
 import Metashape as ms
@@ -72,6 +74,7 @@ class MetashapePipeline:
         self.autosfm_dir = paths.autosfm_dir
         self.refs_dir = paths.refs_dir
         self.grid_dir = paths.pixel_grid_dir
+        self.grid_samples_dir = paths.pixel_grid_samples_dir
 
         self.project_path = paths.project_dir / f"{run_id}.psx"
         self.downscaled_dir = self.autosfm_dir / "downscaled_photos"
@@ -84,7 +87,7 @@ class MetashapePipeline:
         self.err_ref = self.refs_dir / "error_statistics.csv"
         self.fov_ref = self.refs_dir / "fov.csv"
 
-        for d in (self.autosfm_dir, self.refs_dir, self.grid_dir,
+        for d in (self.autosfm_dir, self.refs_dir, self.grid_dir, self.grid_samples_dir,
                   self.project_path.parent, self.ortho_path.parent, self.dem_path.parent):
             d.mkdir(parents=True, exist_ok=True)
 
@@ -101,6 +104,9 @@ class MetashapePipeline:
         self.dem_cfg = _AttrDict(self.cfg.get("dem", {"export": {}}))
         self.ortho_cfg = _AttrDict(self.cfg.get("orthomosaic", {"export": {}}))
         self.pixel_grid_step = self.cfg.get("pixel_grid", {}).get("step", 100)
+        self.export_pixel_grid_samples = self.cfg.get("export_pixel_grid_samples", False)
+        self.pixel_grid_samples_count = self.cfg.get("pixel_grid_samples", {}).get("count", 5)
+        self.pixel_grid_samples_seed = self.cfg.get("pixel_grid_samples", {}).get("seed")
 
         # Recovery-mode flags, ported from the old top-level asfm config.
         self.recover_unaligned_only = self.cfg.get("recover_unaligned_only", False)
@@ -839,10 +845,68 @@ class MetashapePipeline:
                 world_x=world_x, world_y=world_y, world_z=world_z,
                 sensor_width=np.array([w], dtype=np.int32),
                 sensor_height=np.array([h], dtype=np.int32),
-                crs=np.array([str(crs)], dtype=object),
+                crs=np.array([str(crs)], dtype=np.str_),
             )
 
         log.info(f"Pixel-world grid export complete: {len(cameras)} files -> {self.grid_dir}")
+
+    def export_pixel_world_grid_samples(self) -> None:
+        count = self.pixel_grid_samples_count
+        if not isinstance(count, int) or count <= 0:
+            raise MetashapePipelineError(
+                f"autosfm.pixel_grid_samples.count must be a positive integer, got: {count!r}"
+            )
+
+        if self.pixel_grid_samples_seed is not None and not isinstance(self.pixel_grid_samples_seed, int):
+            raise MetashapePipelineError(
+                "autosfm.pixel_grid_samples.seed must be an integer or null."
+            )
+
+        grid_files = sorted(self.grid_dir.glob("*.npz"))
+        if not grid_files:
+            log.warning("No pixel-world grid files found in %s. Skipping sample export.", self.grid_dir)
+            return
+
+        sample_count = min(count, len(grid_files))
+        rng = np.random.default_rng(self.pixel_grid_samples_seed)
+        selected_indices = rng.choice(len(grid_files), size=sample_count, replace=False)
+        selected_grids = [grid_files[idx] for idx in selected_indices]
+
+        self.grid_samples_dir.mkdir(parents=True, exist_ok=True)
+        log.info(
+            "Exporting %s sampled pixel-grid images from %s NPZ files -> %s",
+            sample_count,
+            len(grid_files),
+            self.grid_samples_dir,
+        )
+
+        for npz_path in selected_grids:
+            with np.load(npz_path, allow_pickle=False) as data:
+                world_z = data["world_z"]
+            sample_image = self._world_z_to_heatmap(world_z)
+            output_path = self.grid_samples_dir / f"{npz_path.stem}_world_z.png"
+            Image.fromarray(sample_image, mode="RGB").save(output_path)
+
+    def _world_z_to_heatmap(self, world_z: np.ndarray) -> np.ndarray:
+        z = world_z.astype(np.float64, copy=False)
+        valid_mask = np.isfinite(z)
+
+        normalized = np.zeros_like(z, dtype=np.float32)
+        if valid_mask.any():
+            z_min = np.nanmin(z)
+            z_max = np.nanmax(z)
+            if z_max > z_min:
+                normalized[valid_mask] = ((z[valid_mask] - z_min) / (z_max - z_min)).astype(np.float32)
+            else:
+                normalized[valid_mask] = 0.5
+
+        r = np.clip(1.5 - np.abs(4.0 * normalized - 3.0), 0.0, 1.0)
+        g = np.clip(1.5 - np.abs(4.0 * normalized - 2.0), 0.0, 1.0)
+        b = np.clip(1.5 - np.abs(4.0 * normalized - 1.0), 0.0, 1.0)
+
+        rgb = np.stack([r, g, b], axis=-1)
+        rgb[~valid_mask] = 0.0
+        return (rgb * 255.0).astype(np.uint8)
 
     def export_report(self, progress_callback: Callable = percentage_callback) -> None:
         self.doc.chunk.exportReport(
@@ -910,6 +974,14 @@ class MetashapePipeline:
 
         if cfg.get("export_pixel_grid"):
             self.export_pixel_world_grid()
+
+        if self.export_pixel_grid_samples:
+            if cfg.get("export_pixel_grid"):
+                self.export_pixel_world_grid_samples()
+            else:
+                log.warning(
+                    "Skipping pixel-grid sample image export because autosfm.export_pixel_grid is false."
+                )
 
         if cfg.get("export_report"):
             self.export_report()

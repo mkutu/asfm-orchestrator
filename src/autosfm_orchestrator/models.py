@@ -63,6 +63,7 @@ class RunPaths:
     project_dir: Path
     refs_dir: Path
     pixel_grid_dir: Path
+    pixel_grid_samples_dir: Path
     logs_dir: Path
     outputs_dir: Path
 
@@ -71,6 +72,7 @@ class RunPaths:
 class AutoSfmOutputs:
     project_dir: Path
     pixel_grid_dir: Path
+    pixel_grid_samples_dir: Path
     fov_csv: Path
     camera_reference_csv: Path
     gcp_reference_csv: Path

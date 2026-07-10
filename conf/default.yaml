@@ -1,7 +1,8 @@
 workspace:
   root: /home/mkutuga/asfm-orchestrator
   keep_local_scratch: true  # set false to delete local scratch after each run
-  cleanup_staged_images: false  # delete staged images from NFS staging after a successful run
+  keep_local_report: true  # set false to delete local reports after each run, if keep_local_scratch is true this has no effect
+  cleanup_staged_images: true  # delete staged images from NFS staging after a successful run
 
 run_status_db:
   enabled: false
@@ -162,4 +163,8 @@ autosfm:
   export_pixel_grid: true
   pixel_grid:
     step: 100
+  export_pixel_grid_samples: true
+  pixel_grid_samples:
+    count: 25
+    seed: 42
   export_report: true

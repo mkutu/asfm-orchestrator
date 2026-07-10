@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "PyYAML>=6.0",
+    "Pillow>=10.0",
 ]
 
 [project.scripts]

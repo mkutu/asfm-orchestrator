@@ -22,14 +22,14 @@ class AutoSfmRunner:
     Receives staged (NFS) paths from AutoSfmRun. Metashape runs against
     "execution paths" (see paths.make_execution_paths): images_dir and
     reference_dir stay on NFS, but autosfm_dir/project_dir/refs_dir/
-    pixel_grid_dir are redirected to local scratch disk. This means full-
-    resolution images are read once off NFS during the resize step and never
-    copied there in full — only the resized photos, the .psx project, depth
-    maps, and dense cloud (all of which are compute-heavy and slow/unreliable
-    over NFS) live locally. Only the lightweight outputs (reference CSVs,
-    pixel-world-grid NPZs, report, rasters if export is enabled) get copied
-    back to the NFS-staged run.paths afterward, which is what transfer.py's
-    CERES-promotion logic expects.
+    pixel_grid_dir and pixel_grid_samples_dir are redirected to local scratch
+    disk. This means full-resolution images are read once off NFS during the
+    resize step and never copied there in full — only the resized photos, the
+    .psx project, depth maps, and dense cloud (all of which are compute-heavy
+    and slow/unreliable over NFS) live locally. Only the lightweight outputs
+    (reference CSVs, pixel-world-grid NPZs, sampled pixel-grid images, report,
+    rasters if export is enabled) get copied back to the NFS-staged run.paths
+    afterward, which is what transfer.py's CERES-promotion logic expects.
 
     This class does not query SQLite, parse manual logs, or discover LTS
     locations.
@@ -49,6 +49,7 @@ class AutoSfmRunner:
         log.info("AutoSfM dry run for %s", run.run_id)
         run.paths.refs_dir.mkdir(parents=True, exist_ok=True)
         run.paths.pixel_grid_dir.mkdir(parents=True, exist_ok=True)
+        run.paths.pixel_grid_samples_dir.mkdir(parents=True, exist_ok=True)
 
         placeholder = {
             "run_id": run.run_id,
@@ -98,6 +99,8 @@ class AutoSfmRunner:
 
         run.paths.pixel_grid_dir.mkdir(parents=True, exist_ok=True)
         sync_dir(exec_paths.pixel_grid_dir, run.paths.pixel_grid_dir)
+        run.paths.pixel_grid_samples_dir.mkdir(parents=True, exist_ok=True)
+        sync_dir(exec_paths.pixel_grid_samples_dir, run.paths.pixel_grid_samples_dir)
 
         if pipeline.ortho_path.exists():
             dest = run.paths.autosfm_dir / "ortho" / pipeline.ortho_path.name
@@ -135,6 +138,7 @@ class AutoSfmRunner:
         return AutoSfmOutputs(
             project_dir=project_dir,
             pixel_grid_dir=run.paths.pixel_grid_dir,
+            pixel_grid_samples_dir=run.paths.pixel_grid_samples_dir,
             fov_csv=run.paths.refs_dir / "fov.csv",
             camera_reference_csv=run.paths.refs_dir / "camera_reference.csv",
             gcp_reference_csv=run.paths.refs_dir / "gcp_reference.csv",
