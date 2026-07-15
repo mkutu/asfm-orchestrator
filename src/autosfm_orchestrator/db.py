@@ -196,6 +196,167 @@ class InventoryDb:
             rel_path=Path(row["rel_path"]),
         )
 
+    def compute_batches_ready_for_asfm(
+        self,
+        site: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        source_storage_sites: tuple[str, ...] = ("CERES", "JUNO"),
+    ) -> list[dict]:
+        """Live cross-database computation of batches that have developed JPGs
+        somewhere in `source_storage_sites` but no promoted output yet under
+        data_state='semifield-asfm' at the CERES destination.
+
+        This walks the full globus_file_index.sqlite3 inventory (large, and
+        only refreshed nightly), so it's meant to be called by the
+        `refresh-ready` CLI command to rebuild the `batches_ready_for_asfm`
+        snapshot table in AsfmRunStatusDb, not on every `list-ready` lookup -
+        see AsfmRunStatusDb.list_ready_batches() for the fast filtered read
+        path.
+
+        Developed images for a batch can be indexed at more than one storage
+        site - e.g. CERES's /90daydata/dash_agir/semifield-developed-images
+        (the active copy get_images_for_time_window() actually stages from)
+        and JUNO's /LTS/project/dash_agir/semifield-developed-images
+        long-term archive - so unlike that staging query, this check spans
+        `source_storage_sites` rather than pinning to database.inventory_filters'
+        single site/namespace/storage_root. Promoted AutoSfM output, by
+        contrast, only ever lands at the CERES destination
+        (paths.ceres_output_root), so the "already has output" check stays
+        scoped to database.inventory_filters.
+
+        The semifield-asfm rel_path tree also holds the SUNNY-side `staging/`
+        working copy and the `db/` run-status DB, neither of which means a
+        batch has actually landed at its CERES destination, so both are
+        excluded from the "already has output" check.
+
+        `site` filters on batch_state (the field site code, e.g. NC/MD/TX -
+        distinct from the storage `site` column CERES/NCSU/JUNO/ATLAS, exposed
+        per row below as `storage_site`).
+        `start_date`/`end_date` filter batch_date (YYYY-MM-DD), inclusive.
+
+        Returns one row per (batch_id, storage_site, storage_domain, namespace,
+        storage_root) combination the source images were found at, rather than
+        one row per batch - a batch indexed at both CERES and JUNO gets two
+        rows, each with its own consistent storage_domain/namespace/storage_root
+        (these differ by site, so collapsing to a single row would require
+        picking one arbitrarily or GROUP_CONCAT-ing each column independently,
+        which wouldn't keep values aligned across columns).
+
+        Each row also carries `has_legacy_reference`: some batches already
+        went through AutoSfM under an older version, before output was
+        promoted to the semifield-asfm destination the way it is now: for
+        those, the only trace left is a `reference/` folder under
+        semifield-developed-images/<batch_id>/ itself. Such a batch has no
+        semifield-asfm output, so it still isn't excluded from this "ready"
+        set - the flag just lets a caller tell "genuinely never processed"
+        apart from "processed before, possibly just needs a rerun under the
+        current version/output convention" before deciding to run it again.
+        """
+        filters = self._inventory_filters()
+        source_data_state = filters.get("data_state", "semifield-developed-images")
+
+        params: dict[str, object] = {"source_data_state": source_data_state}
+
+        scope_clauses = []
+        if source_storage_sites:
+            site_params = []
+            for i, storage_site in enumerate(source_storage_sites):
+                key = f"source_storage_site_{i}"
+                site_params.append(f":{key}")
+                params[key] = storage_site
+            scope_clauses.append(f"site IN ({', '.join(site_params)})")
+
+        storage_domain = filters.get("storage_domain")
+        if storage_domain:
+            scope_clauses.append("storage_domain = :storage_domain")
+            params["storage_domain"] = storage_domain
+
+        source_clauses = [
+            "entry_type = 'file'",
+            "is_current = 1",
+            "batch_id IS NOT NULL",
+            "batch_id != ''",
+            "data_state = :source_data_state",
+            "LOWER(file_ext) IN ('jpg', 'jpeg')",
+            "(parent_dir = 'images' OR rel_path LIKE '%/images/%')",
+            *scope_clauses,
+        ]
+
+        if site:
+            source_clauses.append("batch_state = :field_site")
+            params["field_site"] = site
+        if start_date:
+            source_clauses.append("batch_date >= :start_date")
+            params["start_date"] = start_date
+        if end_date:
+            source_clauses.append("batch_date <= :end_date")
+            params["end_date"] = end_date
+
+        legacy_reference_clauses = [
+            "is_current = 1",
+            "batch_id IS NOT NULL",
+            "batch_id != ''",
+            "data_state = :source_data_state",
+            "(parent_dir = 'reference' OR rel_path LIKE '%/reference/%')",
+            *scope_clauses,
+        ]
+
+        dst_clauses = [
+            "is_current = 1",
+            "batch_id IS NOT NULL",
+            "batch_id != ''",
+            "data_state = 'semifield-asfm'",
+            "rel_path NOT LIKE '%/staging/%'",
+            "rel_path NOT LIKE '%/db/%'",
+        ]
+        self._add_optional_scope_filters(dst_clauses, params, filters)
+
+        query = f"""
+            WITH source_batches AS (
+                SELECT
+                    batch_id,
+                    batch_state,
+                    site            AS storage_site,
+                    storage_domain,
+                    namespace,
+                    storage_root,
+                    MIN(batch_date) AS batch_date,
+                    COUNT(*)        AS jpg_count
+                FROM globus_file_index
+                WHERE {' AND '.join(source_clauses)}
+                GROUP BY batch_id, batch_state, site, storage_domain, namespace, storage_root
+            ),
+            dst_batches AS (
+                SELECT DISTINCT batch_id
+                FROM globus_file_index
+                WHERE {' AND '.join(dst_clauses)}
+            ),
+            legacy_reference_batches AS (
+                SELECT DISTINCT batch_id
+                FROM globus_file_index
+                WHERE {' AND '.join(legacy_reference_clauses)}
+            )
+            SELECT
+                s.batch_id,
+                s.batch_state AS site,
+                s.batch_date,
+                s.storage_site,
+                s.storage_domain,
+                s.namespace,
+                s.storage_root,
+                s.jpg_count,
+                CASE WHEN lr.batch_id IS NOT NULL THEN 1 ELSE 0 END AS has_legacy_reference
+            FROM source_batches s
+            LEFT JOIN dst_batches d ON s.batch_id = d.batch_id
+            LEFT JOIN legacy_reference_batches lr ON s.batch_id = lr.batch_id
+            WHERE d.batch_id IS NULL
+            ORDER BY s.batch_date ASC, s.batch_id ASC, s.storage_site ASC
+        """
+        with self.connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
     def summarize_batch(self, batch_id: str) -> list[dict]:
         """Return current batch summary rows, useful for debugging CLI output."""
         query = """
@@ -340,6 +501,94 @@ class AsfmRunStatusDb:
                 conn.commit()
         except Exception as exc:
             log.warning("Could not update run status in SQLite: %s", exc)
+
+    def refresh_batches_ready_for_asfm(self, rows: Iterable[dict]) -> None:
+        """Replaces the batches_ready_for_asfm snapshot table with `rows`, as
+        produced by InventoryDb.compute_batches_ready_for_asfm(). Call this
+        (e.g. the `refresh-ready` CLI command, on a cron alongside the
+        nightly globus_file_index rebuild) whenever the upstream inventory
+        may have changed; list_ready_batches() only ever reads this snapshot,
+        it never touches globus_file_index.sqlite3.
+
+        One row per (batch_id, storage_site, storage_domain, namespace,
+        storage_root) - a batch indexed at both CERES and JUNO gets two rows.
+        The table is dropped and recreated each refresh (rather than migrated
+        in place) since it's a fully-derived cache, not a source of truth.
+        """
+        rows = list(rows)
+        with self.connect() as conn:
+            conn.execute("DROP TABLE IF EXISTS batches_ready_for_asfm")
+            conn.execute(
+                """
+                CREATE TABLE batches_ready_for_asfm (
+                    batch_id TEXT NOT NULL,
+                    site TEXT NOT NULL,
+                    batch_date TEXT NOT NULL,
+                    storage_site TEXT NOT NULL,
+                    storage_domain TEXT NOT NULL,
+                    namespace TEXT NOT NULL,
+                    storage_root TEXT NOT NULL,
+                    jpg_count INTEGER NOT NULL,
+                    has_legacy_reference INTEGER NOT NULL DEFAULT 0 CHECK (has_legacy_reference IN (0, 1)),
+                    computed_at_ts_iso TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    PRIMARY KEY (batch_id, storage_site, storage_domain, namespace, storage_root)
+                )
+                """
+            )
+            conn.executemany(
+                """
+                INSERT INTO batches_ready_for_asfm
+                    (batch_id, site, batch_date, storage_site, storage_domain,
+                     namespace, storage_root, jpg_count, has_legacy_reference)
+                VALUES (:batch_id, :site, :batch_date, :storage_site, :storage_domain,
+                        :namespace, :storage_root, :jpg_count, :has_legacy_reference)
+                """,
+                rows,
+            )
+            conn.commit()
+        log.info("Refreshed batches_ready_for_asfm with %d rows", len(rows))
+
+    def list_ready_batches(
+        self,
+        site: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> list[dict]:
+        """Fast filtered read of the batches_ready_for_asfm snapshot table.
+        Raises DatabaseError if the snapshot hasn't been built yet. Returns
+        one row per (batch_id, storage_site, storage_domain, namespace,
+        storage_root) - see refresh_batches_ready_for_asfm()."""
+        clauses = []
+        params: dict[str, object] = {}
+        if site:
+            clauses.append("site = :site")
+            params["site"] = site
+        if start_date:
+            clauses.append("batch_date >= :start_date")
+            params["start_date"] = start_date
+        if end_date:
+            clauses.append("batch_date <= :end_date")
+            params["end_date"] = end_date
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+        query = f"""
+            SELECT
+                batch_id, site, batch_date, storage_site, storage_domain,
+                namespace, storage_root, jpg_count, has_legacy_reference,
+                computed_at_ts_iso
+            FROM batches_ready_for_asfm
+            {where_sql}
+            ORDER BY batch_date ASC, batch_id ASC, storage_site ASC
+        """
+        with self.connect() as conn:
+            try:
+                rows = conn.execute(query, params).fetchall()
+            except sqlite3.OperationalError as exc:
+                raise DatabaseError(
+                    "batches_ready_for_asfm table not found - run "
+                    "`autosfm-orchestrator refresh-ready` first"
+                ) from exc
+        return [dict(row) for row in rows]
 
 
 def ensure_records_found(records: Iterable[ImageRecord], batch_id: str) -> list[ImageRecord]:
