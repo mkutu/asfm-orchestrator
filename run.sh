@@ -13,6 +13,15 @@ set -uo pipefail
 CONFIG="${AUTOSFM_CONFIG:-conf/default.yaml}"
 INPUT_FILE="${1:-conf/batch_run_list.txt}"
 CPU_RANGE="${AUTOSFM_CPU_RANGE:-2-31}"   # leaves cores 0-1 free for the rest of SUNNY
+GFI_DB_NFS_PATH="${AUTOSFM_GFI_DB_NFS_PATH:-/mnt/research-projects/s/screberg/longterm_images2/globus_index/globus_file_index.sqlite3}"
+GFI_DB_LOCAL_PATH="${AUTOSFM_GFI_DB_LOCAL_PATH:-./db/globus_file_index.sqlite3}"
+
+
+# Make sure the local db is the most recent copy from the NFS path
+
+echo "Updating local GFI DB from NFS path..."
+mkdir -p "$(dirname "$GFI_DB_LOCAL_PATH")"
+rsync -avhP "$GFI_DB_NFS_PATH" "$GFI_DB_LOCAL_PATH"
 
 if [[ ! -f "$INPUT_FILE" ]]; then
     echo "ERROR: Input file not found: $INPUT_FILE"
@@ -109,7 +118,6 @@ while IFS='|' read -r batch_id start_time end_time; do
         --config "$CONFIG"
         run-one
         --batch-id "$batch_id"
-        --season "peanuts_2026"
     )
     [[ -n "$start_time" ]] && cmd+=(--start-time "$start_time")
     [[ -n "$end_time" ]] && cmd+=(--end-time "$end_time")
